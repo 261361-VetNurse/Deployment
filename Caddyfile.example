@@ -1,0 +1,14 @@
+{
+    default_sni your-domain-or-ip
+}
+
+# HTTPS with Caddy internal CA (for local/server IP testing)
+https://your-domain-or-ip {
+    tls internal
+    reverse_proxy frontend:3000
+}
+
+# Redirect HTTP → HTTPS
+http://your-domain-or-ip {
+    redir https://your-domain-or-ip{uri} permanent
+}

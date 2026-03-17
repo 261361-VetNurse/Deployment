@@ -1,0 +1,117 @@
+services:
+  # MySQL Database
+  db:
+    image: mysql:8.0
+    container_name: petlite-mysql
+    restart: unless-stopped
+    env_file:
+      - ./Backend/database/.env
+      - ./.env
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./Backend/database/mysql_data:/var/lib/mysql
+      - ./Backend/database/mysql.cnf:/etc/mysql/conf.d/custom.cnf:ro
+      - ./Backend/database/setup_db_mysql_improved.sql:/docker-entrypoint-initdb.d/01_setup_db.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - petlite-network
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+
+  # Backend API (FastAPI)
+  backend:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: petlite-backend
+    restart: unless-stopped
+    expose:
+      - "8000"
+    env_file:
+      - ./Backend/.env
+      - ./Backend/database/.env
+      - ./.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - petlite-network
+
+  # Scheduler process (single instance)
+  scheduler:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: petlite-scheduler
+    restart: unless-stopped
+    command: ["python", "-u", "-m", "app.scheduler_worker"]
+    env_file:
+      - ./Backend/.env
+      - ./Backend/database/.env
+      - ./.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - petlite-network
+
+  # Frontend (Next.js with Bun)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: "${VITE_API_URL}"
+        VITE_LINE_CLIENT_ID: "${VITE_LINE_CLIENT_ID}"
+        VITE_WEB_URL: "${VITE_WEB_URL}"
+        VITE_LINE_REDIRECT_PATH: "${VITE_LINE_REDIRECT_PATH}"
+        VITE_R2_PUBLIC_URL: "${VITE_R2_PUBLIC_URL}"
+    container_name: petlite-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    env_file:
+      - ./frontend/.env
+      - ./.env
+    depends_on:
+      - backend
+    networks:
+      - petlite-network
+
+  # Caddy — TLS termination & reverse proxy
+  caddy:
+    image: caddy:2-alpine
+    container_name: petlite-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    networks:
+      - petlite-network
+
+networks:
+  petlite-network:
+    name: petlite-network
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
